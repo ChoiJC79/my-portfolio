@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>캘린더 - Choi Seunghwan</title>
+    <style>
+          * {
+                  margin: 0;
+                  padding: 0;
+                  box-sizing: border-box;
+          }
+
+          body {
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  min-height: 100vh;
+                  font-family: 'Noto Sans KR', sans-serif;
+                  padding: 2rem;
+          }
+
+          .container {
+                  max-width: 900px;
+                  margin: 0 auto;
+          }
+
+          header {
+                  text-align: center;
+                  color: white;
+                  margin-bottom: 2rem;
+          }
+
+          header h1 {
+                  font-size: 2.5rem;
+                  margin-bottom: 0.5rem;
+          }
+
+          header a {
+                  display: inline-block;
+                  color: white;
+                  text-decoration: none;
+                  background: rgba(255, 255, 255, 0.2);
+                  padding: 0.5rem 1rem;
+                  border-radius: 5px;
+                  margin-bottom: 1rem;
+                  transition: all 0.3s ease;
+          }
+
+          header a:hover {
+                  background: rgba(255, 255, 255, 0.3);
+          }
+
+          .calendar-container {
+                  background: white;
+                  border-radius: 15px;
+                  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                  padding: 2rem;
+                  overflow: hidden;
+          }
+
+          .calendar-header {
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  margin-bottom: 2rem;
+                  padding-bottom: 1rem;
+                  border-bottom: 2px solid #667eea;
+          }
+
+          .month-year {
+                  font-size: 1.8rem;
+                  font-weight: bold;
+                  color: #333;
+                  min-width: 200px;
+                  text-align: center;
+          }
+
+          .nav-buttons {
+                  display: flex;
+                  gap: 1rem;
+          }
+
+          button {
+                  padding: 0.6rem 1.2rem;
+                  border: none;
+                  border-radius: 8px;
+                  background: #667eea;
+                  color: white;
+                  cursor: pointer;
+                  font-size: 1rem;
+                  font-weight: 600;
+                  transition: all 0.3s ease;
+          }
+
+          button:hover {
+                  background: #764ba2;
+                  transform: translateY(-2px);
+                  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+          }
+
+          .calendar-grid {
+                  display: grid;
+                  grid-template-columns: repeat(7, 1fr);
+                  gap: 1px;
+                  margin-bottom: 2rem;
+                  background: #e0e0e0;
+                  padding: 1px;
+          }
+
+          .day-header {
+                  background: #667eea;
+                  color: white;
+                  padding: 1rem;
+                  text-align: center;
+                  font-weight: bold;
+          }
+
+          .day-cell {
+                  background: white;
+                  padding: 1rem;
+                  min-height: 100px;
+                  position: relative;
+                  cursor: pointer;
+                  transition: all 0.3s ease;
+          }
+
+          .day-cell:hover {
+                  background: #f5f5f5;
+                  box-shadow: inset 0 0 10px rgba(102, 126, 234, 0.1);
+          }
+
+          .day-cell.other-month {
+                  background: #f9f9f9;
+                  color: #999;
+          }
+
+          .day-cell.today {
+                  background: #fff3e0;
+                  border-left: 4px solid #ff9800;
+          }
+
+          .day-number {
+                  font-weight: bold;
+                  color: #333;
+                  margin-bottom: 0.5rem;
+          }
+
+          .events-list {
+                  font-size: 0.75rem;
+                  color: #666;
+          }
+
+          .event-item {
+                  background: #667eea;
+                  color: white;
+                  padding: 0.2rem 0.4rem;
+                  border-radius: 3px;
+                  margin: 0.2rem 0;
+                  white-space: nowrap;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+          }
+
+          .event-form {
+                  background: #f5f5f5;
+                  padding: 1.5rem;
+                  border-radius: 10px;
+                  margin-top: 2rem;
+          }
+
+          .form-title {
+                  font-size: 1.2rem;
+                  font-weight: bold;
+                  color: #333;
+                  margin-bottom: 1rem;
+          }
+
+          .form-group {
+                  margin-bottom: 1rem;
+                  display: flex;
+                  gap: 0.5rem;
+                  flex-wrap: wrap;
+          }
+
+          .form-group input {
+                  flex: 1;
+                  min-width: 200px;
+                  padding: 0.7rem;
+                  border: 1px solid #ddd;
+                  border-radius: 5px;
+                  font-size: 0.9rem;
+          }
+
+          .form-group input:focus {
+                  outline: none;
+                  border-color: #667eea;
+                  box-shadow: 0 0 5px rgba(102, 126, 234, 0.3);
+          }
+
+          .add-event-btn {
+                  background: #4CAF50;
+                  padding: 0.7rem 1.5rem;
+          }
+
+          .add-event-btn:hover {
+                  background: #45a049;
+          }
+
+          .saved-events {
+                  margin-top: 2rem;
+                  padding: 1rem;
+                  background: white;
+                  border-radius: 10px;
+          }
+
+          .saved-events h3 {
+                  margin-bottom: 1rem;
+                  color: #333;
+          }
+
+          .event-tag {
+                  display: inline-block;
+                  background: #667eea;
+                  color: white;
+                  padding: 0.4rem 0.8rem;
+                  border-radius: 20px;
+                  margin: 0.2rem;
+                  font-size: 0.9rem;
+          }
+
+          .event-tag button {
+                  background: none;
+                  border: none;
+                  color: white;
+                  cursor: pointer;
+                  padding: 0;
+                  margin-left: 0.5rem;
+                  font-weight: bold;
+          }
+
+          @media (max-width: 600px) {
+                  body {
+                            padding: 1rem;
+                  }
+
+                  .calendar-container {
+                            padding: 1rem;
+                  }
+
+                  .day-cell {
+                            padding: 0.5rem;
+                            min-height: 80px;
+                  }
+
+                  .day-number {
+                            font-size: 0.9rem;
+                  }
+
+                  .event-item {
+                            font-size: 0.65rem;
+                  }
+
+                  header h1 {
+                            font-size: 1.8rem;
+                  }
+
+                  .month-year {
+                            font-size: 1.3rem;
+                  }
+          }
+        </style>
+  </head>
+  <body>
+      <div class="container">
+            <header>
+                    <h1>📅 일정관리</h1>
+                  <a href="index.html">← 홈으로 돌아가기</a>a>
+            </header>
+      
+          <div class="calendar-container">
+                <div class="calendar-header">
+                        <button onclick="previousMonth()">← 이전 월</button>button>
+                        <div class="month-year" id="monthYear"></div>div>
+                        <button onclick="nextMonth()">다음 월 →</button>button>
+                </div>div>
+          
+                <div class="calendar-grid" id="calendar"></div>div>
+          
+                <div class="event-form">
+                        <div class="form-title">일정 추가</div>div>
+                        <div class="form-group">
+                                  <input type="date" id="eventDate" placeholder="날짜 선택">
+                                  <input type="text" id="eventTitle" placeholder="일정 입력 (예: 회의, 약속)">
+                                  <button class="add-event-btn" onclick="addEvent()">추가</button>button>
+                        </div>div>
+                </div>div>
+          
+                <div class="saved-events">
+                        <h3>등록된 일정</h3>
+                        <div id="eventsList"></div>div>
+                </div>div>
+          </div>div>
+      </div>div>
+  
+    <script>
+          let currentDate = new Date();
+          let events = {};
+
+          // 로컬스토리지에서 이벤트 불러오기
+          function loadEvents() {
+                  const saved = localStorage.getItem('calendarEvents');
+                  if (saved) {
+                            events = JSON.parse(saved);
+                  }
+          }
+
+          // 로컬스토리지에 이벤트 저장
+          function saveEvents() {
+                  localStorage.setItem('calendarEvents', JSON.stringify(events));
+          }
+
+          function getMonthName(date) {
+                  const months = ['1월', '2월', '3월', '4월', '5월', '6월', 
+                                                        '7월', '8월', '9월', '10월', '11월', '12월'];
+                  return months[date.getMonth()];
+          }
+
+          function renderCalendar() {
+                  const year = currentDate.getFullYear();
+                  const month = currentDate.getMonth();
+
+                  // 월 년도 표시
+                  document.getElementById('monthYear').textContent = `${year}년 ${getMonthName(currentDate)}`;
+
+                  // 첫 번째 날의 요일 구하기
+                  const firstDay = new Date(year, month, 1).getDay();
+                  const daysInMonth = new Date(year, month + 1, 0).getDate();
+                  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+                  const calendar = document.getElementById('calendar');
+                  calendar.innerHTML = '';
+
+                  // 요일 헤더
+                  const dayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+                  dayHeaders.forEach(day => {
+                            const header = document.createElement('div');
+                            header.className = 'day-header';
+                            header.textContent = day;
+                            calendar.appendChild(header);
+                  });
+
+                  // 이전 달의 날짜들
+                  for (let i = firstDay - 1; i >= 0; i--) {
+                            const day = daysInPrevMonth - i;
+                            const cell = createDayCell(day, true, false);
+                            calendar.appendChild(cell);
+                  }
+
+                  // 현재 달의 날짜들
+                  const today = new Date();
+                  for (let day = 1; day <= daysInMonth; day++) {
+                            const isToday = day === today.getDate() && 
+                                                      month === today.getMonth() && 
+                                                      year === today.getFullYear();
+                            const cell = createDayCell(day, false, isToday);
+                            calendar.appendChild(cell);
+                  }
+
+                  // 다음 달의 날짜들
+                  const totalCells = calendar.children.length - 7; // 헤더 제외
+                  const remaining = 42 - totalCells;
+                  for (let day = 1; day <= remaining; day++) {
+                            const cell = createDayCell(day, true, false);
+                            calendar.appendChild(cell);
+                  }
+
+                  updateEventsList();
+          }
+
+          function createDayCell(day, isOtherMonth, isToday) {
+                  const cell = document.createElement('div');
+                  cell.className = 'day-cell';
+
+                  if (isOtherMonth) {
+                            cell.classList.add('other-month');
+                  }
+                  if (isToday) {
+                            cell.classList.add('today');
+                  }
+
+                  const dateStr = getDateString(day, isOtherMonth);
+
+                  cell.innerHTML = `
+                          <div class="day-number">${day}</div>
+                                  <div class="events-list" id="events-${dateStr}"></div>
+                                        `;
+
+                  // 이벤트 표시
+                  if (events[dateStr]) {
+                            const eventsList = cell.querySelector('.events-list');
+                            events[dateStr].forEach(event => {
+                                        const eventEl = document.createElement('div');
+                                        eventEl.className = 'event-item';
+                                        eventEl.textContent = event;
+                                        eventsList.appendChild(eventEl);
+                            });
+                  }
+
+                  cell.onclick = () => {
+                            document.getElementById('eventDate').value = dateStr;
+                            document.getElementById('eventTitle').focus();
+                  };
+
+                  return cell;
+          }
+
+          function getDateString(day, isOtherMonth) {
+                  const year = currentDate.getFullYear();
+                  const month = currentDate.getMonth();
+                  let adjustedMonth = month;
+                  let adjustedYear = year;
+
+                  if (isOtherMonth) {
+                            if (day > 15) {
+                                        adjustedMonth = month - 1;
+                                        if (adjustedMonth < 0) {
+                                                      adjustedMonth = 11;
+                                                      adjustedYear = year - 1;
+                                        }
+                            } else {
+                                        adjustedMonth = month + 1;
+                                        if (adjustedMonth > 11) {
+                                                      adjustedMonth = 0;
+                                                      adjustedYear = year + 1;
+                                        }
+                            }
+                  }
+
+                  const m = String(adjustedMonth + 1).padStart(2, '0');
+                  const d = String(day).padStart(2, '0');
+                  return `${adjustedYear}-${m}-${d}`;
+          }
+
+          function previousMonth() {
+                  currentDate.setMonth(currentDate.getMonth() - 1);
+                  renderCalendar();
+          }
+
+          function nextMonth() {
+                  currentDate.setMonth(currentDate.getMonth() + 1);
+                  renderCalendar();
+          }
+
+          function addEvent() {
+                  const dateInput = document.getElementById('eventDate').value;
+                  const titleInput = document.getElementById('eventTitle').value;
+
+                  if (!dateInput || !titleInput.trim()) {
+                            alert('날짜와 일정을 입력해주세요.');
+                            return;
+                  }
+
+                  if (!events[dateInput]) {
+                            events[dateInput] = [];
+                  }
+
+                  events[dateInput].push(titleInput);
+                  saveEvents();
+
+                  document.getElementById('eventDate').value = '';
+                  document.getElementById('eventTitle').value = '';
+
+                  renderCalendar();
+          }
+
+          function deleteEvent(dateStr, index) {
+                  events[dateStr].splice(index, 1);
+                  if (events[dateStr].length === 0) {
+                            delete events[dateStr];
+                  }
+                  saveEvents();
+                  renderCalendar();
+          }
+
+          function updateEventsList() {
+                  const eventsList = document.getElementById('eventsList');
+                  eventsList.innerHTML = '';
+
+                  const allEvents = Object.entries(events).sort((a, b) => {
+                            return new Date(a[0]) - new Date(b[0]);
+                  });
+
+                  if (allEvents.length === 0) {
+                            eventsList.innerHTML = '<p style="color: #999;">등록된 일정이 없습니다.</p>';
+                            return;
+                  }
+
+                  allEvents.forEach(([date, eventArray]) => {
+                            eventArray.forEach((event, index) => {
+                                        const tag = document.createElement('div');
+                                        tag.className = 'event-tag';
+                                        tag.innerHTML = `
+                                                    ${date}: ${event}
+                                                                <button onclick="deleteEvent('${date}', ${index})">✕</button>
+                                                                          `;
+                                        eventsList.appendChild(tag);
+                            });
+                  });
+          }
+
+          // 초기화
+          loadEvents();
+          renderCalendar();
+    </script>
+  </body>
+</html>html>
+    </script></h3></h1>
+            </header>
+  </body>
+    </style></title>
+  </head>
