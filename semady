@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>주문·납품 관리 시스템</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  * { font-family: 'Malgun Gothic','맑은 고딕',-apple-system,BlinkMacSystemFont,sans-serif; }
+  @media print { .no-print{display:none!important;} body{background:#fff!important;} }
+  .status-draft{background:#F3F4F6;color:#374151;}
+  .status-submitted{background:#EFF6FF;color:#1D4ED8;}
+  .status-quoted{background:#FEF3C7;color:#92400E;}
+  .status-quote_approved{background:#D1FAE5;color:#065F46;}
+  .status-in_progress{background:#FEF9C3;color:#713F12;}
+  .status-proof_review{background:#EDE9FE;color:#4C1D95;}
+  .status-proof_approved{background:#DCFCE7;color:#14532D;}
+  .status-delivering{background:#DBEAFE;color:#1E3A8A;}
+  .status-completed{background:#D1FAE5;color:#065F46;}
+  .status-cancelled{background:#FEE2E2;color:#7F1D1D;}
+  ::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-track{background:#F1F5F9;} ::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:3px;}
+  .fade-in{animation:fi .18s ease;} @keyframes fi{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+  input[type=radio]:checked+span{color:#1E3A8A;font-weight:600;}
+  .type-label:has(input:checked){border-color:#3B82F6!important;background:#EFF6FF;}
+</style>
+</head>
+<body class="bg-slate-50">
+<div id="app"></div>
+<script>
+// ═══════════════════════════════════════════════════════
+//  상수
+// ═══════════════════════════════════════════════════════
+const STATUS_LABELS = {
+  draft:'임시저장', submitted:'접수대기', quoted:'견적발송',
+  quote_approved:'견적승인', in_progress:'작업중',
+  proof_review:'시안확인', proof_approved:'시안승인',
+  delivering:'납품중', completed:'완료', cancelled:'취소'
+};
+const STATUS_NEXT = {
+  submitted:'quoted', quoted:'quote_approved', quote_approved:'in_progress',
+  in_progress:'proof_review', proof_review:'proof_approved',
+  proof_approved:'delivering', delivering:'completed'
+};
+const ORDER_TYPES = {
+  supplies:'사무용품', toner:'토너·소모품',
+  banner:'현수막', advertising:'광고물', repair:'수선·용역'
+};
+const uid = ()=>Math.random().toString(36).substr(2,9);
+const today=()=>new Date().toISOString().split('T')[0];
+const fmt=d=>d?d.replace(/-/g,'.'):'—';
+
+// ═══════════════════════════════════════════════════════
+//  스토어
+// ═══════════════════════════════════════════════════════
+const Store = {
+  data:{users:[],orders:[],quotes:[],messages:[],
+    settings:{bizName:'○○종합유통',bizNo:'000-00-00000',ceo:'대표자명',phone:'043-000-0000',addr:'충청북도 제천시 ○○로 ○○',bank:'국민은행 000-00-0000-00 (예금주: ○○○)'}},
+  load(){
+    const s=localStorage.getItem('b2g_v3');
+    if(s) this.data=JSON.parse(s); else this.seed();
+  },
+  save(){localStorage.setItem('b2g_v3',JSON.stringify(this.data));},
+  seed(){
+    this.data.users=[
+      {id:'admin1',email:'admin@test.com',pw:'1234',role:'admin',name:'관리자',org:'○○종합유통',dept:'',phone:'010-0000-0001',addr:'',isActive:true},
+      {id:'staff1',email:'staff@test.com',pw:'1234',role:'staff',name:'김담당',org:'○○종합유통',dept:'영업팀',phone:'010-0000-0002',addr:'',isActive:true},
+      {id:'client1',email:'client@test.com',pw:'1234',role:'client',name:'홍길동',org:'제천시청',dept:'총무과',phone:'043-641-1234',addr:'충청북도 제천시 청전동',isActive:true},
+      {id:'client2',email:'client2@test.com',pw:'1234',role:'client',name:'이영희',org:'제천교육지원청',dept:'행정과',phone:'043-640-7000',addr:'충청북도 제천시',isActive:true}
+    ];
+    this.data.orders=[
+      {id:'ord001',orderNo:'ORD-2026-001',clientId:'client1',staffId:'staff1',type:'banner',status:'proof_review',title:'여름 축제 홍보 현수막 제작',detail:{width:400,height:80,qty:5,material:'천',text:'제2회 의림지 여름 축제\n2026.07.15~07.20'},desiredDate:'2026-07-10',deliveryAddr:'충청북도 제천시 청전동 시청 앞',note:'기존 현수막과 동일한 색감 부탁드립니다.',createdAt:'2026-06-20'},
+      {id:'ord002',orderNo:'ORD-2026-002',clientId:'client1',staffId:null,type:'supplies',status:'submitted',title:'A4 용지 및 볼펜 구매 건',detail:{items:[{name:'A4 복사용지 80g',spec:'500매/박스',qty:10,unit:'박스'},{name:'볼펜 흑색',spec:'12개입',qty:5,unit:'pack'}]},desiredDate:'2026-07-05',deliveryAddr:'제천시청 총무과',note:'',createdAt:'2026-06-22'},
+      {id:'ord003',orderNo:'ORD-2026-003',clientId:'client2',staffId:'staff1',type:'advertising',status:'completed',title:'기관 홍보 브로셔 제작',detail:{kind:'브로셔',spec:'A4 양면',qty:500,color:'4도'},desiredDate:'2026-06-15',deliveryAddr:'제천교육지원청',note:'',createdAt:'2026-06-01'}
+    ];
+    this.data.quotes=[
+      {id:'qt001',quoteNo:'Q-2026-001',orderId:'ord001',items:[{name:'현수막 제작',spec:'400×80cm 천',qty:5,unitPrice:35000,amount:175000}],supplyAmt:175000,vatAmt:17500,totalAmt:192500,validUntil:'2026-07-31',status:'approved',note:'설치비 별도',createdBy:'staff1',createdAt:'2026-06-21'},
+      {id:'qt003',quoteNo:'Q-2026-003',orderId:'ord003',items:[{name:'브로셔 인쇄',spec:'A4 양면 4도',qty:500,unitPrice:800,amount:400000},{name:'디자인비',spec:'1식',qty:1,unitPrice:150000,amount:150000}],supplyAmt:550000,vatAmt:55000,totalAmt:605000,validUntil:'2026-06-30',status:'approved',note:'',createdBy:'staff1',createdAt:'2026-06-02'}
+    ];
+    this.data.messages=[
+      {id:'msg001',orderId:'ord001',senderId:'client1',body:'안녕하세요. 현수막 글자 크기를 좀 더 크게 해주실 수 있을까요?',createdAt:'2026-06-21T10:30:00'},
+      {id:'msg002',orderId:'ord001',senderId:'staff1',body:'네, 제목 글자를 키운 수정 시안으로 업로드해 드리겠습니다. 잠시 기다려 주세요.',createdAt:'2026-06-21T11:02:00'}
+    ];
+    this.save();
+  }
+};
+
+// ═══════════════════════════════════════════════════════
+//  라우터
+// ═══════════════════════════════════════════════════════
+let CU=null, PAGE='login', PARAMS={};
+function go(page,params={}){PAGE=page;PARAMS=params;render();}
+function logout(){CU=null;go('login');}
+
+// ═══════════════════════════════════════════════════════
+//  메인 렌더
+// ═══════════════════════════════════════════════════════
+function render(){
+  const app=document.getElementById('app');
+  if(!CU){app.innerHTML=loginHTML();return;}
+  const isStaff=CU.role==='admin'||CU.role==='staff';
+  let body='';
+  switch(PAGE){
+    case 'dashboard': body=isStaff?adminDash():clientDash(); break;
+    case 'orders':    body=isStaff?adminOrders():clientOrders(); break;
+    case 'order-new': body=newOrderHTML(); break;
+    case 'order-detail': body=isStaff?adminDetail(PARAMS.id):clientDetail(PARAMS.id); break;
+    case 'quote-builder': body=quoteBuilder(PARAMS.orderId); break;
+    case 'settings':  body=settingsHTML(); break;
+    default: body=isStaff?adminDash():clientDash();
+  }
+  app.innerHTML=`<div class="min-h-screen bg-slate-50 flex flex-col">${navHTML()}<main class="flex-1 max-w-6xl mx-auto w-full px-4 py-6"><div class="fade-in">${body}</div></main></div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  네비
+// ═══════════════════════════════════════════════════════
+function navHTML(){
+  const isStaff=CU.role==='admin'||CU.role==='staff';
+  const items=isStaff
+    ?[['dashboard','대시보드'],['orders','주문관리'],['settings','설정']]
+    :[['dashboard','대시보드'],['orders','내 주문'],['order-new','+ 새 주문']];
+  const roleLabel=CU.role==='admin'?'관리자':CU.role==='staff'?'담당자':'고객';
+  return `
+  <nav class="bg-[#1E3A8A] text-white shadow-lg no-print">
+    <div class="max-w-6xl mx-auto px-4 flex items-center justify-between h-14">
+      <div class="flex items-center gap-5">
+        <button onclick="go('dashboard')" class="font-bold text-lg tracking-tight flex items-center gap-2">
+          <span class="text-xl">📋</span><span class="hidden sm:block">주문·납품 관리</span>
+        </button>
+        <div class="hidden sm:flex items-center gap-0.5">
+          ${items.map(([p,l])=>`<button onclick="go('${p}')" class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${PAGE===p?'bg-blue-700':'hover:bg-blue-800'}">${l}</button>`).join('')}
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-blue-200 hidden sm:block">${CU.org} <strong>${CU.name}</strong> <span class="text-xs bg-blue-700 rounded-md px-1.5 py-0.5 ml-1">${roleLabel}</span></span>
+        <button onclick="logout()" class="text-xs text-blue-300 hover:text-white border border-blue-600 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors">로그아웃</button>
+      </div>
+    </div>
+  </nav>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  로그인
+// ═══════════════════════════════════════════════════════
+function loginHTML(){
+  return `
+  <div class="min-h-screen bg-gradient-to-br from-[#1E3A8A] to-[#2563EB] flex items-center justify-center p-4">
+    <div class="w-full max-w-sm">
+      <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-16 h-16 bg-white bg-opacity-20 rounded-2xl mb-4 text-3xl">📋</div>
+        <h1 class="text-2xl font-bold text-white">주문·납품 관리</h1>
+        <p class="text-blue-200 text-sm mt-1">관공서 전용 B2G 주문 시스템</p>
+      </div>
+      <div class="bg-white rounded-2xl shadow-2xl p-7">
+        <div class="mb-4">
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">이메일</label>
+          <input id="lEmail" type="email" placeholder="이메일 입력" class="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        </div>
+        <div class="mb-5">
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">비밀번호</label>
+          <input id="lPw" type="password" placeholder="비밀번호 입력" class="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <button onclick="doLogin()" class="w-full bg-[#1E3A8A] hover:bg-blue-900 text-white font-bold py-3 rounded-xl transition-colors text-sm shadow-lg shadow-blue-900/30">로그인</button>
+        <div id="lErr" class="hidden text-red-500 text-xs text-center mt-2.5 bg-red-50 rounded-lg py-2">이메일 또는 비밀번호를 확인해 주세요.</div>
+        <div class="mt-6 pt-5 border-t border-slate-100">
+          <p class="text-xs text-slate-400 text-center mb-3 font-medium">― 데모 계정 ―</p>
+          <div class="grid grid-cols-3 gap-2">
+            ${[['🔧 관리자','admin@test.com'],['👤 담당자','staff@test.com'],['🏛 고객','client@test.com']].map(([l,e])=>`
+              <button onclick="demoLogin('${e}')" class="text-xs border border-slate-200 rounded-xl py-2.5 hover:bg-blue-50 hover:border-blue-300 transition-all text-slate-600 font-medium">${l}</button>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function doLogin(){
+  const e=document.getElementById('lEmail').value.trim();
+  const p=document.getElementById('lPw').value;
+  const u=Store.data.users.find(x=>x.email===e&&x.pw===p&&x.isActive);
+  if(u){CU=u;go('dashboard');}
+  else document.getElementById('lErr').classList.remove('hidden');
+}
+function demoLogin(email){
+  const u=Store.data.users.find(x=>x.email===email);
+  if(u){CU=u;go('dashboard');}
+}
+
+// ═══════════════════════════════════════════════════════
+//  유틸 컴포넌트
+// ═══════════════════════════════════════════════════════
+function badge(status){
+  return `<span class="text-xs px-2.5 py-1 rounded-full font-semibold status-${status}">${STATUS_LABELS[status]||status}</span>`;
+}
+function card(content,extra=''){
+  return `<div class="bg-white rounded-xl border border-slate-200 shadow-sm ${extra}">${content}</div>`;
+}
+function statCard(label,val,icon,clr='blue'){
+  const bg={blue:'bg-blue-50 text-blue-600',amber:'bg-amber-50 text-amber-600',green:'bg-green-50 text-green-600',slate:'bg-slate-100 text-slate-500'};
+  return `<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+    <div class="flex items-center justify-between mb-3"><p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">${label}</p>
+    <div class="w-9 h-9 rounded-xl ${bg[clr]} flex items-center justify-center text-base">${icon}</div></div>
+    <p class="text-3xl font-bold text-slate-800">${val}</p></div>`;
+}
+function infoRow(l,v){
+  return `<div class="flex gap-2 py-1"><dt class="text-slate-400 text-xs font-semibold uppercase tracking-wide w-20 shrink-0 pt-0.5">${l}</dt><dd class="text-slate-800 text-sm font-medium">${v||'—'}</dd></div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  클라이언트 대시보드
+// ═══════════════════════════════════════════════════════
+function clientDash(){
+  const ords=Store.data.orders.filter(o=>o.clientId===CU.id);
+  const recent=[...ords].reverse().slice(0,4);
+  return `
+  <div>
+    <div class="flex items-center justify-between mb-6">
+      <div><h2 class="text-xl font-bold text-slate-800">안녕하세요, ${CU.name}님 👋</h2>
+      <p class="text-sm text-slate-500 mt-0.5">${CU.org} ${CU.dept}</p></div>
+      <button onclick="go('order-new')" class="bg-[#1E3A8A] hover:bg-blue-900 text-white font-semibold px-5 py-2.5 rounded-xl text-sm shadow transition-colors flex items-center gap-1.5">
+        <span class="text-base">+</span> 새 주문
+      </button>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      ${statCard('전체',ords.length,'📦','slate')}
+      ${statCard('접수대기',ords.filter(o=>o.status==='submitted').length,'⏳','amber')}
+      ${statCard('진행중',ords.filter(o=>!['completed','cancelled','submitted','draft'].includes(o.status)).length,'⚡','blue')}
+      ${statCard('완료',ords.filter(o=>o.status==='completed').length,'✅','green')}
+    </div>
+    ${card(`
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        <h3 class="font-semibold text-slate-700">최근 주문</h3>
+        <button onclick="go('orders')" class="text-xs text-blue-600 hover:underline font-medium">전체보기 →</button>
+      </div>
+      ${recent.length===0
+        ?`<div class="py-14 text-center text-slate-400"><p class="text-2xl mb-2">📭</p><p class="text-sm">주문 내역이 없습니다.</p>
+           <button onclick="go('order-new')" class="mt-3 text-sm text-blue-600 hover:underline font-semibold">첫 주문 신청하기</button></div>`
+        :recent.map(o=>`
+          <div class="px-5 py-3.5 flex items-center gap-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0" onclick="go('order-detail',{id:'${o.id}'})">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-slate-800 truncate">${o.title}</p>
+              <p class="text-xs text-slate-400 mt-0.5">${o.orderNo} · ${ORDER_TYPES[o.type]} · ${fmt(o.createdAt)}</p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">${badge(o.status)}<span class="text-slate-300">›</span></div>
+          </div>`).join('')}
+    `)}
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  관리자 대시보드
+// ═══════════════════════════════════════════════════════
+function adminDash(){
+  const ords=Store.data.orders;
+  const waiting=ords.filter(o=>o.status==='submitted');
+  return `
+  <div>
+    <h2 class="text-xl font-bold text-slate-800 mb-6">관리자 대시보드</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      ${statCard('전체 주문',ords.length,'📦','slate')}
+      ${statCard('접수대기',waiting.length,'⏳','amber')}
+      ${statCard('진행중',ords.filter(o=>!['completed','cancelled','submitted','draft'].includes(o.status)).length,'⚡','blue')}
+      ${statCard('완료',ords.filter(o=>o.status==='completed').length,'✅','green')}
+    </div>
+    ${card(`
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        <h3 class="font-semibold text-slate-700">⚠️ 처리 필요 주문 <span class="ml-1.5 text-xs bg-red-100 text-red-600 rounded-full px-2 py-0.5 font-bold">${waiting.length}</span></h3>
+        <button onclick="go('orders')" class="text-xs text-blue-600 hover:underline font-medium">전체보기 →</button>
+      </div>
+      ${waiting.length===0
+        ?`<div class="py-12 text-center text-slate-400 text-sm">✅ 처리 대기 주문이 없습니다.</div>`
+        :waiting.map(o=>{
+          const cl=Store.data.users.find(u=>u.id===o.clientId);
+          return `<div class="px-5 py-4 flex items-center gap-4 hover:bg-amber-50 cursor-pointer border-b border-slate-100 last:border-0" onclick="go('order-detail',{id:'${o.id}'})">
+            <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 text-lg shrink-0">⏳</div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-slate-800 truncate">${o.title}</p>
+              <p class="text-xs text-slate-400 mt-0.5">${cl?.org} ${cl?.dept} · ${ORDER_TYPES[o.type]} · ${fmt(o.createdAt)}</p>
+            </div>
+            <button class="text-xs bg-[#1E3A8A] text-white px-3 py-2 rounded-lg hover:bg-blue-900 font-semibold whitespace-nowrap">처리 →</button>
+          </div>`;
+        }).join('')}
+    `)}
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  주문 목록 (공통)
+// ═══════════════════════════════════════════════════════
+function clientOrders(){
+  return orderListHTML(Store.data.orders.filter(o=>o.clientId===CU.id).reverse(), false);
+}
+function adminOrders(){
+  return orderListHTML([...Store.data.orders].reverse(), true);
+}
+function orderListHTML(orders, isAdmin){
+  return `
+  <div>
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="text-xl font-bold text-slate-800">${isAdmin?'전체 주문 관리':'내 주문 목록'}</h2>
+      ${!isAdmin?`<button onclick="go('order-new')" class="bg-[#1E3A8A] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-blue-900 transition-colors">+ 새 주문</button>`:''}
+    </div>
+    ${card(`
+      <div class="overflow-x-auto">
+        ${orders.length===0?`<div class="py-16 text-center text-slate-400"><p class="text-3xl mb-2">📭</p><p>주문이 없습니다.</p></div>`:`
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wide">주문번호</th>
+              ${isAdmin?'<th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wide">기관</th>':''}
+              <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wide">제목</th>
+              <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wide">유형</th>
+              <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wide">상태</th>
+              <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wide">희망완료</th>
+              <th class="text-left px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wide">신청일</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${orders.map(o=>{
+              const cl=Store.data.users.find(u=>u.id===o.clientId);
+              return `<tr class="hover:bg-blue-50/40 cursor-pointer transition-colors" onclick="go('order-detail',{id:'${o.id}'})">
+                <td class="px-4 py-3 font-mono text-xs text-slate-400 font-semibold">${o.orderNo}</td>
+                ${isAdmin?`<td class="px-4 py-3"><p class="text-sm font-semibold text-slate-700">${cl?.org||''}</p><p class="text-xs text-slate-400">${cl?.dept||''}</p></td>`:''}
+                <td class="px-4 py-3 max-w-xs"><p class="font-semibold text-slate-800 truncate">${o.title}</p></td>
+                <td class="px-4 py-3 text-slate-500 text-xs font-medium">${ORDER_TYPES[o.type]}</td>
+                <td class="px-4 py-3">${badge(o.status)}</td>
+                <td class="px-4 py-3 text-slate-500 text-xs">${fmt(o.desiredDate)}</td>
+                <td class="px-4 py-3 text-slate-400 text-xs">${fmt(o.createdAt)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`}
+      </div>
+    `)}
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  새 주문 신청
+// ═══════════════════════════════════════════════════════
+function newOrderHTML(){
+  return `
+  <div class="max-w-2xl mx-auto">
+    <div class="flex items-center gap-3 mb-6">
+      <button onclick="go('orders')" class="text-slate-400 hover:text-slate-600 text-sm font-medium flex items-center gap-1">← 목록</button>
+      <h2 class="text-xl font-bold text-slate-800">새 주문 신청</h2>
+    </div>
+    ${card(`
+      <div class="p-6">
+        <div class="mb-6">
+          <label class="block text-sm font-bold text-slate-700 mb-2.5">주문 유형 <span class="text-red-500">*</span></label>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            ${Object.entries(ORDER_TYPES).map(([k,v])=>`
+              <label class="type-label flex items-center gap-2.5 border-2 border-slate-200 rounded-xl px-3 py-3 cursor-pointer hover:border-blue-300 transition-all">
+                <input type="radio" name="oType" value="${k}" class="text-blue-600">
+                <span class="text-sm font-semibold text-slate-700">${v}</span>
+              </label>`).join('')}
+          </div>
+        </div>
+        <div id="typeFields" class="mb-4"></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">제목 / 요약 <span class="text-red-500">*</span></label>
+            <input id="nTitle" type="text" placeholder="주문 제목을 간략히 입력" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">희망 완료일</label>
+            <input id="nDate" type="date" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+        </div>
+        <div class="mb-4">
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">납품 주소</label>
+          <input id="nAddr" type="text" value="${CU.addr||''}" placeholder="납품 또는 작업 주소" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="mb-6">
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">특이사항·요청사항</label>
+          <textarea id="nNote" rows="3" placeholder="추가 요청사항을 입력해 주세요." class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+        </div>
+        <div class="flex gap-3">
+          <button onclick="go('orders')" class="flex-1 border-2 border-slate-200 text-slate-600 font-semibold py-3 rounded-xl hover:bg-slate-50 transition-colors text-sm">취소</button>
+          <button onclick="submitOrder()" class="flex-1 bg-[#1E3A8A] hover:bg-blue-900 text-white font-bold py-3 rounded-xl transition-colors text-sm shadow-lg shadow-blue-900/20">주문 신청</button>
+        </div>
+      </div>
+    `)}
+  </div>`;
+}
+
+document.addEventListener('change',function(e){
+  if(e.target.name!=='oType') return;
+  const type=e.target.value;
+  const el=document.getElementById('typeFields');
+  if(!el) return;
+  const wrap=(content)=>`<div class="mb-4 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+    <p class="text-xs font-bold text-blue-600 uppercase tracking-wide mb-3">${ORDER_TYPES[type]} 상세 정보</p>${content}</div>`;
+  const inp=(id,label,type2='text',ph='',extra='')=>
+    `<div><label class="text-xs font-semibold text-slate-600 mb-1 block">${label}</label>
+     <input id="tf_${id}" type="${type2}" placeholder="${ph}" ${extra} class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>`;
+  if(type==='banner'){
+    el.innerHTML=wrap(`<div class="grid grid-cols-3 gap-3 mb-3">
+      ${inp('width','가로(cm)','number','400')}${inp('height','세로(cm)','number','80')}${inp('qty','수량','number','1')}</div>
+      <div class="mb-3"><label class="text-xs font-semibold text-slate-600 mb-1 block">재질</label>
+      <select id="tf_material" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"><option>천</option><option>비닐</option><option>메쉬</option></select></div>
+      <div><label class="text-xs font-semibold text-slate-600 mb-1 block">홍보 문구</label>
+      <textarea id="tf_text" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none focus:ring-2 focus:ring-blue-500" placeholder="현수막에 들어갈 문구"></textarea></div>`);
+  } else if(type==='advertising'){
+    el.innerHTML=wrap(`<div class="grid grid-cols-2 gap-3">
+      <div><label class="text-xs font-semibold text-slate-600 mb-1 block">종류</label>
+      <select id="tf_kind" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none"><option>브로셔</option><option>포스터</option><option>스티커</option><option>배너</option><option>사인물</option></select></div>
+      ${inp('spec','규격','text','A4 양면')}${inp('qty','수량','number','500')}
+      <div><label class="text-xs font-semibold text-slate-600 mb-1 block">도수</label>
+      <select id="tf_color" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none"><option>4도</option><option>단색</option><option>2도</option></select></div></div>`);
+  } else if(type==='repair'){
+    el.innerHTML=wrap(`<div class="grid grid-cols-2 gap-3 mb-3">
+      ${inp('workType','작업 유형','text','도배, 전기, 배관 등')}${inp('location','작업 위치','text','○○과 ○○호')}</div>
+      <div><label class="text-xs font-semibold text-slate-600 mb-1 block">작업 내용 상세</label>
+      <textarea id="tf_desc" rows="3" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none focus:ring-2 focus:ring-blue-500" placeholder="구체적인 작업 내용"></textarea></div>`);
+  } else {
+    el.innerHTML=wrap(`
+      <div class="space-y-2" id="supItems">
+        <div class="grid grid-cols-12 gap-2 text-xs text-slate-400 font-semibold px-0.5 mb-1">
+          <span class="col-span-5">품목명</span><span class="col-span-3">규격</span><span class="col-span-2">수량</span><span class="col-span-2">단위</span>
+        </div>
+        <div class="grid grid-cols-12 gap-2 sup-row">
+          <input class="sup-name col-span-5 border border-slate-200 rounded-lg px-2 py-2 text-sm" placeholder="품목명">
+          <input class="sup-spec col-span-3 border border-slate-200 rounded-lg px-2 py-2 text-sm" placeholder="규격">
+          <input class="sup-qty col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm" type="number" placeholder="1">
+          <input class="sup-unit col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm" placeholder="박스">
+        </div>
+      </div>
+      <button type="button" onclick="addSupRow()" class="mt-2 text-xs text-blue-600 hover:underline font-semibold">+ 품목 추가</button>`);
+  }
+});
+function addSupRow(){
+  const c=document.getElementById('supItems'); if(!c) return;
+  const r=document.createElement('div'); r.className='grid grid-cols-12 gap-2 sup-row';
+  r.innerHTML=`<input class="sup-name col-span-5 border border-slate-200 rounded-lg px-2 py-2 text-sm" placeholder="품목명">
+    <input class="sup-spec col-span-3 border border-slate-200 rounded-lg px-2 py-2 text-sm" placeholder="규격">
+    <input class="sup-qty col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm" type="number" placeholder="1">
+    <input class="sup-unit col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm" placeholder="박스">`;
+  c.appendChild(r);
+}
+function submitOrder(){
+  const title=document.getElementById('nTitle')?.value.trim();
+  const typeEl=document.querySelector('input[name="oType"]:checked');
+  if(!title||!typeEl){alert('주문 유형과 제목을 입력해 주세요.');return;}
+  const type=typeEl.value; const detail={};
+  if(type==='banner'){detail.width=document.getElementById('tf_width')?.value;detail.height=document.getElementById('tf_height')?.value;detail.qty=document.getElementById('tf_qty')?.value;detail.material=document.getElementById('tf_material')?.value;detail.text=document.getElementById('tf_text')?.value;}
+  else if(type==='advertising'){detail.kind=document.getElementById('tf_kind')?.value;detail.spec=document.getElementById('tf_spec')?.value;detail.qty=document.getElementById('tf_qty')?.value;detail.color=document.getElementById('tf_color')?.value;}
+  else if(type==='repair'){detail.workType=document.getElementById('tf_workType')?.value;detail.location=document.getElementById('tf_location')?.value;detail.desc=document.getElementById('tf_desc')?.value;}
+  else{detail.items=Array.from(document.querySelectorAll('.sup-row')).map(r=>({name:r.querySelector('.sup-name')?.value,spec:r.querySelector('.sup-spec')?.value,qty:r.querySelector('.sup-qty')?.value,unit:r.querySelector('.sup-unit')?.value})).filter(x=>x.name);}
+  const seq=Store.data.orders.length+1;
+  const o={id:uid(),orderNo:`ORD-2026-${String(seq).padStart(3,'0')}`,clientId:CU.id,staffId:null,type,status:'submitted',title,detail,desiredDate:document.getElementById('nDate')?.value,deliveryAddr:document.getElementById('nAddr')?.value,note:document.getElementById('nNote')?.value,createdAt:today()};
+  Store.data.orders.push(o); Store.save(); go('order-detail',{id:o.id});
+}
+
+// ═══════════════════════════════════════════════════════
+//  주문 상세 - 클라이언트
+// ═══════════════════════════════════════════════════════
+function clientDetail(id){
+  const o=Store.data.orders.find(x=>x.id===id);
+  if(!o) return `<div class="text-center py-20 text-slate-400">주문을 찾을 수 없습니다.</div>`;
+  const qt=Store.data.quotes.find(q=>q.orderId===id);
+  const msgs=Store.data.messages.filter(m=>m.orderId===id);
+  const steps=['submitted','quoted','quote_approved','in_progress','proof_approved','delivering','completed'];
+  const cur=steps.indexOf(o.status);
+  return `
+  <div class="max-w-3xl mx-auto">
+    <div class="flex flex-wrap items-center gap-3 mb-5">
+      <button onclick="go('orders')" class="text-slate-400 hover:text-slate-600 text-sm">← 목록</button>
+      <h2 class="text-lg font-bold text-slate-800 flex-1">${o.title}</h2>
+      ${badge(o.status)}
+    </div>
+    <!-- 진행 단계 -->
+    ${card(`<div class="px-6 py-5"><div class="flex items-start">${steps.map((s,i)=>`
+      <div class="flex-1 flex flex-col items-center relative">
+        ${i<steps.length-1?`<div class="absolute top-4 left-1/2 w-full h-0.5 ${i<cur?'bg-[#1E3A8A]':'bg-slate-200'}"></div>`:''}
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold z-10 ${i<cur?'bg-[#1E3A8A] text-white':i===cur?'bg-[#1E3A8A] text-white ring-4 ring-blue-100':'bg-slate-100 text-slate-400'}">${i<cur?'✓':i+1}</div>
+        <p class="text-[10px] mt-2 text-center leading-tight font-semibold ${i<=cur?'text-blue-700':'text-slate-400'}">${STATUS_LABELS[s]}</p>
+      </div>`).join('')}</div></div>`,'mb-4')}
+    <!-- 주문 정보 -->
+    ${card(`<div class="px-5 py-4 border-b border-slate-100"><h3 class="font-bold text-slate-700 text-sm">주문 정보</h3></div>
+      <dl class="px-5 py-4 grid grid-cols-2 gap-x-6">${infoRow('주문번호',o.orderNo)}${infoRow('유형',ORDER_TYPES[o.type])}${infoRow('신청일',fmt(o.createdAt))}${infoRow('희망완료',fmt(o.desiredDate))}${infoRow('납품주소',o.deliveryAddr)}${infoRow('특이사항',o.note||'—')}</dl>
+    `,'mb-4')}
+    <!-- 견적서 -->
+    ${qt?`${card(`
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-2"><h3 class="font-bold text-slate-700 text-sm">견적서 (${qt.quoteNo})</h3>
+          <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${qt.status==='approved'?'bg-green-100 text-green-700':'bg-amber-100 text-amber-700'}">${qt.status==='approved'?'승인완료':'검토대기'}</span>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="printQuotePopup('${qt.id}')" class="text-xs border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50 font-medium text-slate-600">🖨️ 인쇄·PDF</button>
+          ${qt.status!=='approved'?`<button onclick="approveQuote('${qt.id}')" class="text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg px-3 py-1.5 font-bold">✓ 견적 승인</button>`:''}
+        </div>
+      </div>
+      <div class="p-5">
+        <div class="overflow-x-auto"><table class="w-full text-sm mb-4">
+          <thead class="bg-slate-50 text-xs"><tr>
+            <th class="text-left px-3 py-2 text-slate-400 font-bold">품목/작업명</th>
+            <th class="text-left px-3 py-2 text-slate-400 font-bold">규격</th>
+            <th class="text-right px-3 py-2 text-slate-400 font-bold">수량</th>
+            <th class="text-right px-3 py-2 text-slate-400 font-bold">단가</th>
+            <th class="text-right px-3 py-2 text-slate-400 font-bold">금액</th>
+          </tr></thead>
+          <tbody class="divide-y divide-slate-100">
+            ${qt.items.map(it=>`<tr><td class="px-3 py-2.5 font-medium">${it.name}</td><td class="px-3 py-2.5 text-slate-400">${it.spec}</td><td class="px-3 py-2.5 text-right">${it.qty}</td><td class="px-3 py-2.5 text-right">${it.unitPrice.toLocaleString()}</td><td class="px-3 py-2.5 text-right font-semibold">${it.amount.toLocaleString()}</td></tr>`).join('')}
+          </tbody>
+        </table></div>
+        <div class="text-right text-sm space-y-1 pt-3 border-t border-slate-100">
+          <div class="text-slate-500">공급가액: <span class="text-slate-700 font-semibold">${qt.supplyAmt.toLocaleString()}원</span></div>
+          <div class="text-slate-500">부가세(10%): <span class="text-slate-700 font-semibold">${qt.vatAmt.toLocaleString()}원</span></div>
+          <div class="text-base font-bold text-slate-900">합&nbsp;계: ${qt.totalAmt.toLocaleString()}원</div>
+        </div>
+      </div>
+    `,'mb-4')}`:''}
+    <!-- 메시지 -->
+    ${msgThread(id, msgs)}
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  주문 상세 - 관리자
+// ═══════════════════════════════════════════════════════
+function adminDetail(id){
+  const o=Store.data.orders.find(x=>x.id===id);
+  if(!o) return `<div class="text-center py-20 text-slate-400">주문을 찾을 수 없습니다.</div>`;
+  const cl=Store.data.users.find(u=>u.id===o.clientId);
+  const qt=Store.data.quotes.find(q=>q.orderId===id);
+  const msgs=Store.data.messages.filter(m=>m.orderId===id);
+  const next=STATUS_NEXT[o.status];
+  return `
+  <div class="max-w-3xl mx-auto">
+    <div class="flex flex-wrap items-center gap-3 mb-5">
+      <button onclick="go('orders')" class="text-slate-400 hover:text-slate-600 text-sm">← 목록</button>
+      <h2 class="text-lg font-bold text-slate-800 flex-1">${o.title}</h2>
+      ${badge(o.status)}
+    </div>
+    <!-- 처리 패널 -->
+    <div class="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 mb-4 flex items-center justify-between">
+      <div>
+        <p class="text-xs text-blue-200 font-semibold uppercase tracking-wide mb-0.5">현재 상태</p>
+        <p class="text-white font-bold">${STATUS_LABELS[o.status]}</p>
+        ${next?`<p class="text-blue-200 text-xs mt-0.5">다음 단계: ${STATUS_LABELS[next]}</p>`:`<p class="text-blue-200 text-xs mt-0.5">최종 완료 상태</p>`}
+      </div>
+      <div class="flex flex-wrap gap-2 justify-end">
+        ${!qt&&o.status==='submitted'?`<button onclick="go('quote-builder',{orderId:'${id}'})" class="text-sm bg-white text-blue-700 hover:bg-blue-50 font-bold px-4 py-2 rounded-xl transition-colors">📄 견적서 작성</button>`:''}
+        ${next?`<button onclick="advanceStatus('${id}')" class="text-sm bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-2 rounded-xl transition-colors">→ ${STATUS_LABELS[next]}</button>`:''}
+        ${o.status==='completed'?`<button onclick="printDeliveryPopup('${id}')" class="text-sm bg-white text-blue-700 hover:bg-blue-50 font-bold px-4 py-2 rounded-xl transition-colors">🖨️ 납품서</button>`:''}
+        <button onclick="cancelOrder('${id}')" class="text-sm border border-blue-500 text-white px-3 py-2 rounded-xl hover:bg-blue-800 transition-colors">✕ 취소</button>
+      </div>
+    </div>
+    <!-- 정보 그리드 -->
+    <div class="grid sm:grid-cols-2 gap-4 mb-4">
+      ${card(`<div class="px-5 py-4 border-b border-slate-100"><h3 class="font-bold text-slate-700 text-sm">고객 정보</h3></div>
+        <dl class="px-5 py-4">${infoRow('기관',cl?.org)}${infoRow('부서',cl?.dept)}${infoRow('담당자',cl?.name)}${infoRow('연락처',cl?.phone)}</dl>`)}
+      ${card(`<div class="px-5 py-4 border-b border-slate-100"><h3 class="font-bold text-slate-700 text-sm">주문 정보</h3></div>
+        <dl class="px-5 py-4">${infoRow('주문번호',o.orderNo)}${infoRow('유형',ORDER_TYPES[o.type])}${infoRow('희망완료',fmt(o.desiredDate))}${infoRow('납품주소',o.deliveryAddr)}</dl>`)}
+    </div>
+    <!-- 견적서 (관리자 뷰) -->
+    ${qt?`${card(`
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-2"><h3 class="font-bold text-slate-700 text-sm">견적서 (${qt.quoteNo})</h3>
+          <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${qt.status==='approved'?'bg-green-100 text-green-700':'bg-amber-100 text-amber-700'}">${qt.status==='approved'?'고객승인':'대기중'}</span>
+        </div>
+        <button onclick="printQuotePopup('${qt.id}')" class="text-xs border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50 font-medium text-slate-600">🖨️ 인쇄·PDF</button>
+      </div>
+      <div class="overflow-x-auto p-5"><table class="w-full text-sm">
+        <thead class="bg-slate-50 text-xs"><tr>
+          <th class="text-left px-3 py-2 text-slate-400 font-bold">품목</th><th class="text-left px-3 py-2 text-slate-400 font-bold">규격</th>
+          <th class="text-right px-3 py-2 text-slate-400 font-bold">수량</th><th class="text-right px-3 py-2 text-slate-400 font-bold">단가</th>
+          <th class="text-right px-3 py-2 text-slate-400 font-bold">금액</th>
+        </tr></thead>
+        <tbody class="divide-y divide-slate-100">
+          ${qt.items.map(it=>`<tr><td class="px-3 py-2.5 font-medium">${it.name}</td><td class="px-3 py-2.5 text-slate-400">${it.spec}</td><td class="px-3 py-2.5 text-right">${it.qty}</td><td class="px-3 py-2.5 text-right">${it.unitPrice.toLocaleString()}</td><td class="px-3 py-2.5 text-right font-semibold">${it.amount.toLocaleString()}</td></tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="text-right text-sm mt-3 pt-3 border-t border-slate-100">
+        <span class="text-slate-500 mr-3">공급가: ${qt.supplyAmt.toLocaleString()}원 / 부가세: ${qt.vatAmt.toLocaleString()}원</span>
+        <span class="font-bold text-slate-900 text-base">합계: ${qt.totalAmt.toLocaleString()}원</span>
+      </div></div>
+    `,'mb-4')}`:''}
+    <!-- 메시지 -->
+    ${msgThread(id, msgs)}
+  </div>`;
+}
+
+function advanceStatus(id){
+  const o=Store.data.orders.find(x=>x.id===id);
+  if(o&&STATUS_NEXT[o.status]){o.status=STATUS_NEXT[o.status];Store.save();go('order-detail',{id});}
+}
+function cancelOrder(id){
+  if(!confirm('이 주문을 취소하시겠습니까?')) return;
+  const o=Store.data.orders.find(x=>x.id===id);
+  if(o){o.status='cancelled';Store.save();go('orders');}
+}
+function approveQuote(qId){
+  const q=Store.data.quotes.find(x=>x.id===qId);
+  if(q){q.status='approved';const o=Store.data.orders.find(x=>x.id===q.orderId);if(o)o.status='quote_approved';Store.save();go('order-detail',{id:q.orderId});}
+}
+
+// ═══════════════════════════════════════════════════════
+//  메시지 스레드
+// ═══════════════════════════════════════════════════════
+function msgThread(orderId, msgs){
+  return card(`
+    <div class="px-5 py-4 border-b border-slate-100"><h3 class="font-bold text-slate-700 text-sm">메시지</h3></div>
+    <div class="p-5">
+      <div class="space-y-3 mb-4 max-h-60 overflow-y-auto pr-1" id="msgArea">
+        ${msgs.length===0?`<div class="text-center py-6 text-slate-400 text-sm">💬 메시지가 없습니다.</div>`:''}
+        ${msgs.map(m=>{
+          const s=Store.data.users.find(u=>u.id===m.senderId);
+          const mine=m.senderId===CU.id;
+          return `<div class="flex ${mine?'justify-end':'justify-start'}">
+            <div class="max-w-[75%]">
+              ${!mine?`<p class="text-xs text-slate-400 mb-1 font-semibold">${s?.name||'?'} (${s?.org||''})</p>`:''}
+              <div class="text-sm px-4 py-2.5 rounded-2xl ${mine?'bg-[#1E3A8A] text-white rounded-tr-sm':'bg-slate-100 text-slate-800 rounded-tl-sm'}">${m.body}</div>
+              <p class="text-[10px] text-slate-300 mt-1 ${mine?'text-right':''}">${m.createdAt?.replace('T',' ').slice(0,16)||''}</p>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="flex gap-2">
+        <input id="msgIn" type="text" placeholder="메시지를 입력하세요..." class="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" onkeydown="if(event.key==='Enter')sendMsg('${orderId}')">
+        <button onclick="sendMsg('${orderId}')" class="bg-[#1E3A8A] hover:bg-blue-900 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-colors">전송</button>
+      </div>
+    </div>
+  `);
+}
+function sendMsg(orderId){
+  const el=document.getElementById('msgIn'); if(!el) return;
+  const body=el.value.trim(); if(!body) return;
+  Store.data.messages.push({id:uid(),orderId,senderId:CU.id,body,createdAt:new Date().toISOString()});
+  Store.save(); el.value=''; go('order-detail',{id:orderId});
+}
+
+// ═══════════════════════════════════════════════════════
+//  견적서 작성
+// ═══════════════════════════════════════════════════════
+function quoteBuilder(orderId){
+  const o=Store.data.orders.find(x=>x.id===orderId);
+  if(!o) return '';
+  return `
+  <div class="max-w-2xl mx-auto">
+    <div class="flex items-center gap-3 mb-5">
+      <button onclick="go('order-detail',{id:'${orderId}'})" class="text-slate-400 hover:text-slate-600 text-sm">← 주문으로</button>
+      <h2 class="text-xl font-bold text-slate-800">견적서 작성</h2>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">📦 ${o.title} (${o.orderNo})</p>
+    ${card(`
+      <div class="p-6">
+        <h3 class="font-bold text-slate-700 mb-3 text-sm">견적 항목</h3>
+        <div class="grid grid-cols-12 gap-2 text-xs text-slate-400 font-bold uppercase tracking-wide px-0.5 mb-2">
+          <span class="col-span-4">품목/작업명</span><span class="col-span-2">규격</span>
+          <span class="col-span-1 text-right">수량</span><span class="col-span-2 text-right">단가</span>
+          <span class="col-span-2 text-right">금액</span><span class="col-span-1"></span>
+        </div>
+        <div id="qItems" class="space-y-2 mb-3">
+          <div class="grid grid-cols-12 gap-2 q-row">
+            <input class="qi-n col-span-4 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="품목명">
+            <input class="qi-s col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none" placeholder="규격">
+            <input class="qi-q col-span-1 border border-slate-200 rounded-lg px-2 py-2 text-sm text-right focus:outline-none" type="number" value="1" oninput="calcQt()">
+            <input class="qi-p col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm text-right focus:outline-none" type="number" value="0" oninput="calcQt()">
+            <div class="qi-a col-span-2 flex items-center justify-end text-sm font-semibold text-slate-700 pr-1">0</div>
+            <button onclick="rmQtRow(this)" class="col-span-1 text-slate-300 hover:text-red-400 text-xl font-bold transition-colors">×</button>
+          </div>
+        </div>
+        <button onclick="addQtRow()" class="text-xs text-blue-600 hover:underline font-bold mb-5">+ 항목 추가</button>
+        <div class="text-right text-sm text-slate-600 space-y-1 border-t-2 border-slate-100 pt-4">
+          <div>공급가액: <span id="qS" class="font-semibold text-slate-800">0원</span></div>
+          <div>부가세(10%): <span id="qV" class="font-semibold text-slate-800">0원</span></div>
+          <div class="text-xl font-bold text-[#1E3A8A] mt-2">합계: <span id="qT">0원</span></div>
+        </div>
+        <div class="grid grid-cols-2 gap-4 mt-5 pt-4 border-t border-slate-100">
+          <div><label class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5 block">견적 유효기간</label>
+            <input id="qValid" type="date" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>
+          <div><label class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5 block">비고</label>
+            <input id="qNote" type="text" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="예) 설치비 별도"></div>
+        </div>
+        <div class="flex gap-3 mt-6">
+          <button onclick="go('order-detail',{id:'${orderId}'})" class="flex-1 border-2 border-slate-200 text-slate-600 font-semibold py-3 rounded-xl hover:bg-slate-50 text-sm">취소</button>
+          <button onclick="saveQuote('${orderId}')" class="flex-1 bg-[#1E3A8A] hover:bg-blue-900 text-white font-bold py-3 rounded-xl text-sm shadow-lg shadow-blue-900/20">📨 견적서 발송</button>
+        </div>
+      </div>
+    `)}
+  </div>`;
+}
+function addQtRow(){
+  const c=document.getElementById('qItems'); if(!c) return;
+  const r=document.createElement('div'); r.className='grid grid-cols-12 gap-2 q-row';
+  r.innerHTML=`<input class="qi-n col-span-4 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none" placeholder="품목명">
+    <input class="qi-s col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none" placeholder="규격">
+    <input class="qi-q col-span-1 border border-slate-200 rounded-lg px-2 py-2 text-sm text-right focus:outline-none" type="number" value="1" oninput="calcQt()">
+    <input class="qi-p col-span-2 border border-slate-200 rounded-lg px-2 py-2 text-sm text-right focus:outline-none" type="number" value="0" oninput="calcQt()">
+    <div class="qi-a col-span-2 flex items-center justify-end text-sm font-semibold text-slate-700 pr-1">0</div>
+    <button onclick="rmQtRow(this)" class="col-span-1 text-slate-300 hover:text-red-400 text-xl font-bold">×</button>`;
+  c.appendChild(r);
+}
+function rmQtRow(btn){
+  const rows=document.querySelectorAll('.q-row'); if(rows.length<=1) return;
+  btn.closest('.q-row').remove(); calcQt();
+}
+function calcQt(){
+  let sup=0;
+  document.querySelectorAll('.q-row').forEach(r=>{
+    const q=parseFloat(r.querySelector('.qi-q')?.value)||0;
+    const p=parseFloat(r.querySelector('.qi-p')?.value)||0;
+    const a=q*p; const el=r.querySelector('.qi-a');
+    if(el) el.textContent=a.toLocaleString(); sup+=a;
+  });
+  const vat=Math.round(sup*0.1);
+  document.getElementById('qS').textContent=sup.toLocaleString()+'원';
+  document.getElementById('qV').textContent=vat.toLocaleString()+'원';
+  document.getElementById('qT').textContent=(sup+vat).toLocaleString()+'원';
+}
+function saveQuote(orderId){
+  const items=[];
+  document.querySelectorAll('.q-row').forEach(r=>{
+    const name=r.querySelector('.qi-n')?.value.trim(); if(!name) return;
+    const qty=parseFloat(r.querySelector('.qi-q')?.value)||0;
+    const unitPrice=parseFloat(r.querySelector('.qi-p')?.value)||0;
+    items.push({name,spec:r.querySelector('.qi-s')?.value||'',qty,unitPrice,amount:qty*unitPrice});
+  });
+  if(!items.length){alert('견적 항목을 입력해 주세요.');return;}
+  const supplyAmt=items.reduce((s,i)=>s+i.amount,0);
+  const vatAmt=Math.round(supplyAmt*0.1);
+  const seq=Store.data.quotes.length+1;
+  Store.data.quotes.push({id:uid(),quoteNo:`Q-2026-${String(seq).padStart(3,'0')}`,orderId,items,supplyAmt,vatAmt,totalAmt:supplyAmt+vatAmt,validUntil:document.getElementById('qValid')?.value,note:document.getElementById('qNote')?.value,status:'sent',createdBy:CU.id,createdAt:today()});
+  const o=Store.data.orders.find(x=>x.id===orderId);
+  if(o){o.status='quoted';o.staffId=CU.id;}
+  Store.save(); go('order-detail',{id:orderId});
+}
+
+// ═══════════════════════════════════════════════════════
+//  설정
+// ═══════════════════════════════════════════════════════
+function settingsHTML(){
+  const s=Store.data.settings;
+  const f=(id,label,val)=>`<div><label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">${label}</label>
+    <input id="s_${id}" type="text" value="${val||''}" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>`;
+  return `
+  <div class="max-w-xl">
+    <h2 class="text-xl font-bold text-slate-800 mb-5">업체 정보 설정</h2>
+    ${card(`<div class="p-6 space-y-4">
+      ${f('bizName','업체명 (상호)',s.bizName)}${f('bizNo','사업자등록번호',s.bizNo)}
+      ${f('ceo','대표자명',s.ceo)}${f('phone','연락처',s.phone)}
+      ${f('addr','주소',s.addr)}${f('bank','계좌번호',s.bank)}
+      <button onclick="saveSettings()" class="w-full bg-[#1E3A8A] hover:bg-blue-900 text-white font-bold py-3 rounded-xl text-sm mt-2 transition-colors shadow">저장</button>
+    </div>`)}
+  </div>`;
+}
+function saveSettings(){
+  ['bizName','bizNo','ceo','phone','addr','bank'].forEach(k=>{
+    const el=document.getElementById(`s_${k}`); if(el) Store.data.settings[k]=el.value;
+  }); Store.save();
+  const btn=event.target; btn.textContent='✅ 저장 완료'; setTimeout(()=>{btn.textContent='저장';},1800);
+}
+
+// ═══════════════════════════════════════════════════════
+//  견적서 인쇄 팝업
+// ═══════════════════════════════════════════════════════
+function printQuotePopup(qId){
+  const q=Store.data.quotes.find(x=>x.id===qId); if(!q) return;
+  const o=Store.data.orders.find(x=>x.id===q.orderId);
+  const cl=Store.data.users.find(u=>u.id===o?.clientId);
+  const s=Store.data.settings;
+  const html=`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<style>
+*{font-family:'Malgun Gothic','맑은 고딕',sans-serif;margin:0;padding:0;box-sizing:border-box;}
+body{background:#fff;color:#111;font-size:11pt;padding:18mm 20mm;}
+h1{text-align:center;font-size:26pt;font-weight:bold;letter-spacing:10px;margin-bottom:18px;}
+.meta{display:flex;justify-content:space-between;font-size:9.5pt;color:#555;margin-bottom:16px;border-bottom:2px solid #1E3A8A;padding-bottom:10px;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+.box{border:1.5px solid #1E3A8A;border-radius:4px;overflow:hidden;}
+.box-title{background:#1E3A8A;color:#fff;font-size:9pt;font-weight:bold;padding:5px 10px;}
+.box-body{padding:8px 10px;}
+.row{display:grid;grid-template-columns:70px 1fr;border-bottom:1px solid #eef;font-size:9.5pt;}
+.row:last-child{border-bottom:none;}
+.row dt{background:#F5F8FF;padding:5px 8px;color:#444;font-weight:bold;}
+.row dd{padding:5px 8px;}
+table{width:100%;border-collapse:collapse;margin-bottom:12px;}
+th{background:#1E3A8A;color:#fff;padding:7px 10px;font-size:9pt;border:1px solid #163080;text-align:center;}
+td{padding:6px 10px;font-size:9.5pt;border:1px solid #dde;}
+.tr{text-align:right;} .tc{text-align:center;}
+.summary{text-align:right;line-height:2;font-size:10pt;}
+.total{font-size:14pt;font-weight:bold;color:#1E3A8A;border-top:2px solid #1E3A8A;padding-top:6px;margin-top:4px;}
+.signs{display:flex;justify-content:flex-end;gap:24px;margin-top:24px;}
+.sign{border:1px solid #ccc;padding:8px 20px;text-align:center;min-width:90px;border-radius:4px;}
+.sign p{font-size:8.5pt;color:#666;margin-bottom:22px;}
+.btns{text-align:center;margin-top:24px;}
+.btns button{padding:9px 22px;border:none;border-radius:8px;cursor:pointer;font-size:10.5pt;font-family:inherit;margin:0 5px;}
+@media print{.btns{display:none;} @page{size:A4;margin:18mm 20mm;}}
+</style></head><body>
+<h1>견&nbsp;&nbsp;&nbsp;&nbsp;적&nbsp;&nbsp;&nbsp;&nbsp;서</h1>
+<div class="meta">
+  <span>문서번호: <strong>${q.quoteNo}</strong></span>
+  <span>발행일: <strong>${fmt(q.createdAt||today())}</strong></span>
+  <span>유효기간: <strong>${fmt(q.validUntil)||'—'}</strong></span>
+</div>
+<div class="two-col">
+  <div class="box"><div class="box-title">수 신 (공급받는자)</div><div class="box-body">
+    <div class="row"><dt>기관명</dt><dd>${cl?.org||''}</dd></div>
+    <div class="row"><dt>부서명</dt><dd>${cl?.dept||''}</dd></div>
+    <div class="row"><dt>담당자</dt><dd>${cl?.name||''} 귀중</dd></div>
+    <div class="row"><dt>연락처</dt><dd>${cl?.phone||''}</dd></div>
+  </div></div>
+  <div class="box"><div class="box-title">공 급 자 정 보</div><div class="box-body">
+    <div class="row"><dt>상호</dt><dd>${s.bizName}</dd></div>
+    <div class="row"><dt>사업자번호</dt><dd>${s.bizNo}</dd></div>
+    <div class="row"><dt>대표자</dt><dd>${s.ceo}</dd></div>
+    <div class="row"><dt>연락처</dt><dd>${s.phone}</dd></div>
+    <div class="row"><dt>주소</dt><dd>${s.addr}</dd></div>
+    <div class="row"><dt>계좌</dt><dd>${s.bank}</dd></div>
+  </div></div>
+</div>
+<div class="box"><div class="box-title">견 적 내 역</div>
+<table><thead><tr>
+  <th style="width:36px">NO</th><th>품목 / 작업명</th>
+  <th style="width:80px">규격</th><th style="width:48px">수량</th>
+  <th style="width:90px">단가 (원)</th><th style="width:100px">금액 (원)</th>
+</tr></thead><tbody>
+${q.items.map((it,i)=>`<tr><td class="tc">${i+1}</td><td>${it.name}</td><td class="tc">${it.spec}</td><td class="tc">${it.qty}</td><td class="tr">${it.unitPrice.toLocaleString()}</td><td class="tr"><strong>${it.amount.toLocaleString()}</strong></td></tr>`).join('')}
+${Array(Math.max(0,5-q.items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+</tbody></table></div>
+<div class="summary">
+  <div>공급가액: <strong>${q.supplyAmt.toLocaleString()}원</strong></div>
+  <div>부가세(10%): <strong>${q.vatAmt.toLocaleString()}원</strong></div>
+  <div class="total">합&nbsp;&nbsp;&nbsp;계: ${q.totalAmt.toLocaleString()}원</div>
+</div>
+${q.note?`<p style="margin-top:10px;font-size:9.5pt;color:#555;">※ 비고: ${q.note}</p>`:''}
+<div class="signs">
+  <div class="sign"><p>담당자 확인</p><span style="font-size:20px">⎯ (인) ⎯</span></div>
+  <div class="sign"><p>대표자 서명</p><span style="font-size:20px">⎯ (인) ⎯</span></div>
+</div>
+<div class="btns">
+  <button onclick="window.print()" style="background:#1E3A8A;color:#fff;">🖨️ 인쇄 / PDF 저장</button>
+  <button onclick="window.close()" style="background:#6B7280;color:#fff;">닫기</button>
+</div>
+</body></html>`;
+  const w=window.open('','_blank','width=820,height=720');
+  w.document.write(html); w.document.close();
+}
+
+// ═══════════════════════════════════════════════════════
+//  납품서 인쇄 팝업
+// ═══════════════════════════════════════════════════════
+function printDeliveryPopup(orderId){
+  const o=Store.data.orders.find(x=>x.id===orderId); if(!o) return;
+  const q=Store.data.quotes.find(x=>x.orderId===orderId);
+  const cl=Store.data.users.find(u=>u.id===o.clientId);
+  const s=Store.data.settings;
+  const dNo='D-2026-'+String(Store.data.orders.indexOf(o)+1).padStart(3,'0');
+  const html=`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<style>
+*{font-family:'Malgun Gothic','맑은 고딕',sans-serif;margin:0;padding:0;box-sizing:border-box;}
+body{background:#fff;color:#111;font-size:11pt;padding:18mm 20mm;}
+h1{text-align:center;font-size:24pt;font-weight:bold;letter-spacing:8px;margin-bottom:16px;}
+.meta{display:flex;justify-content:space-between;font-size:9.5pt;color:#555;margin-bottom:14px;border-bottom:2px solid #1E3A8A;padding-bottom:10px;}
+.box{border:1.5px solid #1E3A8A;border-radius:4px;overflow:hidden;margin-bottom:14px;}
+.box-title{background:#1E3A8A;color:#fff;font-size:9pt;font-weight:bold;padding:5px 10px;}
+.row{display:grid;grid-template-columns:80px 1fr;border-bottom:1px solid #eef;font-size:9.5pt;}
+.row dt{background:#F5F8FF;padding:5px 8px;color:#444;font-weight:bold;}
+.row dd{padding:5px 8px;}
+table{width:100%;border-collapse:collapse;margin:0;}
+th{background:#1E3A8A;color:#fff;padding:7px 10px;font-size:9pt;border:1px solid #163080;text-align:center;}
+td{padding:6px 10px;font-size:9.5pt;border:1px solid #dde;}
+.tr{text-align:right;} .tc{text-align:center;}
+.confirm{display:flex;justify-content:space-between;align-items:center;border:1.5px solid #1E3A8A;border-radius:4px;padding:12px 16px;margin-top:14px;}
+.confirm-box{text-align:center;min-width:100px;}
+.confirm-box p{font-size:9pt;color:#555;margin-bottom:16px;}
+.btns{text-align:center;margin-top:24px;}
+.btns button{padding:9px 22px;border:none;border-radius:8px;cursor:pointer;font-size:10.5pt;font-family:inherit;margin:0 5px;}
+@media print{.btns{display:none;} @page{size:A4;margin:18mm 20mm;}}
+</style></head><body>
+<h1>거 래 명 세 서</h1>
+<div class="meta">
+  <span>문서번호: <strong>${dNo}</strong></span>
+  <span>납품일: <strong>${fmt(today())}</strong></span>
+  <span>주문번호: <strong>${o.orderNo}</strong></span>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+  <div class="box"><div class="box-title">공급받는자</div><div style="padding:0">
+    <div class="row"><dt>기관명</dt><dd>${cl?.org||''}</dd></div>
+    <div class="row"><dt>부서명</dt><dd>${cl?.dept||''}</dd></div>
+    <div class="row"><dt>담당자</dt><dd>${cl?.name||''}</dd></div>
+    <div class="row"><dt>납품주소</dt><dd>${o.deliveryAddr||''}</dd></div>
+  </div></div>
+  <div class="box"><div class="box-title">공급자</div><div style="padding:0">
+    <div class="row"><dt>상호</dt><dd>${s.bizName}</dd></div>
+    <div class="row"><dt>사업자번호</dt><dd>${s.bizNo}</dd></div>
+    <div class="row"><dt>대표자</dt><dd>${s.ceo}</dd></div>
+    <div class="row"><dt>연락처</dt><dd>${s.phone}</dd></div>
+  </div></div>
+</div>
+<div class="box"><div class="box-title">납 품 내 역</div>
+<table><thead><tr>
+  <th style="width:36px">NO</th><th>품목 / 작업명</th>
+  <th style="width:80px">규격</th><th style="width:48px">수량</th>
+  <th style="width:90px">단가 (원)</th><th style="width:100px">금액 (원)</th>
+</tr></thead><tbody>
+${q?q.items.map((it,i)=>`<tr><td class="tc">${i+1}</td><td>${it.name}</td><td class="tc">${it.spec}</td><td class="tc">${it.qty}</td><td class="tr">${it.unitPrice.toLocaleString()}</td><td class="tr"><strong>${it.amount.toLocaleString()}</strong></td></tr>`).join(''):'<tr><td class="tc">1</td><td>—</td><td></td><td></td><td></td><td></td></tr>'}
+</tbody></table>
+${q?`<div style="text-align:right;padding:10px 16px;border-top:1px solid #dde;font-size:10pt;">
+  공급가액: <strong>${q.supplyAmt.toLocaleString()}원</strong> &nbsp;|&nbsp;
+  부가세: <strong>${q.vatAmt.toLocaleString()}원</strong> &nbsp;|&nbsp;
+  <strong style="font-size:13pt;color:#1E3A8A;">합계: ${q.totalAmt.toLocaleString()}원</strong>
+</div>`:''}
+</div>
+<div class="confirm">
+  <p style="font-size:10pt;font-weight:bold;">위 물품을 정히 납품하였음을 확인합니다.</p>
+  <div style="display:flex;gap:24px;">
+    <div class="confirm-box"><p>납품 확인자 (수령)</p><span>_____________________ (인)</span></div>
+    <div class="confirm-box"><p>납품자</p><span>_____________________ (인)</span></div>
+  </div>
+</div>
+<div class="btns">
+  <button onclick="window.print()" style="background:#1E3A8A;color:#fff;">🖨️ 인쇄 / PDF 저장</button>
+  <button onclick="window.close()" style="background:#6B7280;color:#fff;">닫기</button>
+</div>
+</body></html>`;
+  const w=window.open('','_blank','width=820,height=720');
+  w.document.write(html); w.document.close();
+}
+
+// ═══════════════════════════════════════════════════════
+//  초기화
+// ═══════════════════════════════════════════════════════
+Store.load();
+render();
+</script>
+</body>
+</html>
